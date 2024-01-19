@@ -68,7 +68,9 @@ class reduction extends Module {
     })
 
     val tree_layer = RegInit(VecInit(Seq.fill(4)(VecInit(Seq.fill(16)(F44.zero)))))
+    val tree_layer_reg = RegInit(VecInit(Seq.fill(4)(VecInit(Seq.fill(16)(F44.zero)))))
     val prefix = RegInit(VecInit(Seq.fill(17)(F44.zero)))
+    val prefix_reg = RegInit(VecInit(Seq.fill(17)(F44.zero)))
     val output_reg = Reg(Vec(16,F44()))
     val output_border_reg = RegInit(F44.zero)
     val split_reverse = Wire(Vec(17,Bool()))
@@ -91,33 +93,40 @@ class reduction extends Module {
     .otherwise{
         tree_layer(0)(0) := io.border + io.product(0)
     }
+    
     io.patial_product := output_reg
 
     for(i<-1 until 16){
-        tree_layer(0)(i) := io.product(i) + F44.zero
+        tree_layer(0)(i) := tree_layer_reg(0)(i)
+        tree_layer_reg(0)(i) := io.product(i)
     }
     
     for(i<-0 until 8){
-        tree_layer(1)(2*i) := tree_layer(0)(2*i) + F44.zero
+        tree_layer(1)(2*i) := tree_layer_reg(1)(2*i)
+        tree_layer_reg(1)(2*i) := tree_layer(0)(2*i)
         tree_layer(1)(2*i+1) := tree_layer(0)(2*i) + tree_layer(0)(2*i+1)
     }
 
     for(i<-0 until 4){
-        tree_layer(2)(4*i) := tree_layer(1)(4*i) + F44.zero
-        tree_layer(2)(4*i+1) := tree_layer(1)(4*i+1) + F44.zero
+        tree_layer(2)(4*i) := tree_layer_reg(2)(4*i)
+        tree_layer_reg(2)(4*i) := tree_layer(1)(4*i)
+        tree_layer(2)(4*i+1) := tree_layer_reg(2)(4*i+1)
+        tree_layer_reg(2)(4*i+1) := tree_layer(1)(4*i+1)
         tree_layer(2)(4*i+2) := tree_layer(1)(4*i+1) + tree_layer(1)(4*i+2)
         tree_layer(2)(4*i+3) := tree_layer(1)(4*i+1) + tree_layer(1)(4*i+3)
     }
 
     for(i<-0 until 2){
         for(j<-0 until 4){
-            tree_layer(3)(8*i+j) := tree_layer(2)(8*i+j) + F44.zero
+            tree_layer(3)(8*i+j) := tree_layer_reg(3)(8*i+j)
+            tree_layer_reg(3)(8*i+j) := tree_layer(2)(8*i+j)
             tree_layer(3)(8*i+4+j) := tree_layer(2)(8*i+3) + tree_layer(2)(8*i+4+j)
         }
     }
 
     for(i<-0 until 8){
-        prefix(i+1) := tree_layer(3)(i) + F44.zero
+        prefix(i+1) := prefix_reg(i+1)
+        prefix_reg(i+1) := tree_layer(3)(i)
         prefix(9+i) := tree_layer(3)(7) + tree_layer(3)(8+i)
     }
 
