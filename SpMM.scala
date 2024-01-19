@@ -192,7 +192,7 @@ class issue extends Module {
     val innerproduct_state = RegInit(false.B)
 
     val reduction_state = RegInit(false.B)
-    val reduction_row_counter = Counter(16)
+    val reduction_row_counter = Counter(17)
     val reduction_col_counter = Counter(16)
     val split_for_reduction = Reg(Vec(17,Bool()))
     val target_row_for_reduction = Reg(Vec(16,UInt(8.W)))
