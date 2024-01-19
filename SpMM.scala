@@ -270,7 +270,7 @@ class issue extends Module {
         innerproduct_row_counter.reset()
         innerproduct_col_counter.reset()
         innerproduct_state := true.B
-
+        //border_control_for_reduction := true.B
         collect_reset_counter.reset()
         collect_reset_state := true.B
     }
@@ -319,18 +319,22 @@ class issue extends Module {
                 split(lhsRowIdx_buffer(i)(7,4))(lhsRowIdx_buffer(i)(3,0)) := true.B
                 row_tag(lhsRowIdx_buffer(i)(7,4))(lhsRowIdx_buffer(i)(3,0)) := i.U
             }
+            //border_control_for_reduction := true.B
         }
         when(innerproduct_row_counter.value===0.U&&innerproduct_col_counter.value===1.U){
-            border_control_for_reduction := true.B
             for(i<-0 until 16){
                 for(j<-0 until 16){
                     when(split(i)(j)){
                         mask_buffer(i)(row_tag(i)(j)) := true.B
                     }
                 }
-            } 
+            }
+            //border_control_for_reduction := true.B 
         }
-        when(innerproduct_row_counter.value===1.U&&innerproduct_col_counter.value===1.U){
+        when(innerproduct_row_counter.value===0.U&&innerproduct_col_counter.value===3.U){
+            border_control_for_reduction := true.B
+        }
+        when(innerproduct_row_counter.value===1.U&&innerproduct_col_counter.value===3.U){
             border_control_for_reduction := false.B
         }
     }
@@ -339,12 +343,7 @@ class issue extends Module {
         split_for_reduction(i+1) := split(reduction_row_counter.value)(i)
     }
     target_row_for_reduction := row_tag(reduction_row_counter.value)
-    when(reduction_row_counter.value===0.U){
-        border_control_for_reduction := true.B
-    }
-    .otherwise{
-        border_control_for_reduction := false.B
-    }
+
 
     when(reduction_state){
         when(reduction_col_counter.value===15.U){
@@ -393,7 +392,7 @@ class issue extends Module {
         write_control_for_collect := false.B
         when(collect_output_state){
             collect_output_row_counter.inc()
-            when(collect_output_row_counter.value===18.U){
+            when(collect_output_row_counter.value===15.U){
                 collect_output_state := false.B
             }
             row_output_for_collect := collect_output_row_counter.value(3,0)
