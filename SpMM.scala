@@ -45,6 +45,7 @@ class innerproduct extends Module {
         val rhsData = Input(Vec(16,F44()))
         val outData = Output(Vec(16,F44()))
     })
+    
     val product = Reg(Vec(16,F44()))
     
     for(i<-0 until 16){
@@ -54,9 +55,7 @@ class innerproduct extends Module {
     io.outData := product
 }
 
-class reduction extends Module {
-    
-
+class reduction extends Module {    
     val io = IO(new Bundle{
         val product = Input(Vec(16,F44()))
         val border = Input(F44())
@@ -68,19 +67,26 @@ class reduction extends Module {
     })
 
     val tree_layer = RegInit(VecInit(Seq.fill(4)(VecInit(Seq.fill(16)(F44.zero)))))
+    val tree_layer_reg = RegInit(VecInit(Seq.fill(4)(VecInit(Seq.fill(16)(F44.zero)))))
     val prefix = RegInit(VecInit(Seq.fill(17)(F44.zero)))
+    val prefix_reg = RegInit(VecInit(Seq.fill(17)(F44.zero)))
     val output_reg = Reg(Vec(16,F44()))
     val output_border_reg = RegInit(F44.zero)
     val split_reverse = Wire(Vec(17,Bool()))
     val former_prefix = Wire(Vec(18,UInt(8.W)))
     val split_reg = Reg(Vec(17,Bool()))
     val target_row_reg = Reg(Vec(16,UInt(8.W)))
+    
     split_reg := io.split
     target_row_reg := io.target_row
+    io.patial_product := output_reg
+
     for(i<-0 until 17){
         split_reverse(i) := io.split(16-i) 
     }
+    
     former_prefix(0) := 0.U
+    
     for(i<-1 until 18){
         former_prefix(i) := i.U-1.U-PriorityEncoder(split_reverse.slice(17-i,17))
     }
@@ -91,33 +97,38 @@ class reduction extends Module {
     .otherwise{
         tree_layer(0)(0) := io.border + io.product(0)
     }
-    io.patial_product := output_reg
-
+    
     for(i<-1 until 16){
-        tree_layer(0)(i) := io.product(i) + F44.zero
+        tree_layer(0)(i) := tree_layer_reg(0)(i)
+        tree_layer_reg(0)(i) := io.product(i)
     }
     
     for(i<-0 until 8){
-        tree_layer(1)(2*i) := tree_layer(0)(2*i) + F44.zero
+        tree_layer(1)(2*i) := tree_layer_reg(1)(2*i)
+        tree_layer_reg(1)(2*i) := tree_layer(0)(2*i)
         tree_layer(1)(2*i+1) := tree_layer(0)(2*i) + tree_layer(0)(2*i+1)
     }
 
     for(i<-0 until 4){
-        tree_layer(2)(4*i) := tree_layer(1)(4*i) + F44.zero
-        tree_layer(2)(4*i+1) := tree_layer(1)(4*i+1) + F44.zero
+        tree_layer(2)(4*i) := tree_layer_reg(2)(4*i)
+        tree_layer_reg(2)(4*i) := tree_layer(1)(4*i)
+        tree_layer(2)(4*i+1) := tree_layer_reg(2)(4*i+1)
+        tree_layer_reg(2)(4*i+1) := tree_layer(1)(4*i+1)
         tree_layer(2)(4*i+2) := tree_layer(1)(4*i+1) + tree_layer(1)(4*i+2)
         tree_layer(2)(4*i+3) := tree_layer(1)(4*i+1) + tree_layer(1)(4*i+3)
     }
 
     for(i<-0 until 2){
         for(j<-0 until 4){
-            tree_layer(3)(8*i+j) := tree_layer(2)(8*i+j) + F44.zero
+            tree_layer(3)(8*i+j) := tree_layer_reg(3)(8*i+j)
+            tree_layer_reg(3)(8*i+j) := tree_layer(2)(8*i+j)
             tree_layer(3)(8*i+4+j) := tree_layer(2)(8*i+3) + tree_layer(2)(8*i+4+j)
         }
     }
 
     for(i<-0 until 8){
-        prefix(i+1) := tree_layer(3)(i) + F44.zero
+        prefix(i+1) := prefix_reg(i+1)
+        prefix_reg(i+1) := tree_layer(3)(i)
         prefix(9+i) := tree_layer(3)(7) + tree_layer(3)(8+i)
     }
 
@@ -144,7 +155,6 @@ class collect extends Module {
         val row_output = Input(UInt(8.W))
         val row_for_reset = Input(UInt(8.W))
     })
-
 
     val output_buffer = SyncReadMem(16,Vec(16,F44()))
     val result_reg = Reg(Vec(16,F44()))
@@ -174,56 +184,40 @@ class issue extends Module {
     val lhsRow_count = Reg(UInt(8.W))
     val input_counter = Counter(16)
     val lhs_input_state = RegInit(false.B)
-    val rhs_input_state = RegInit(false.B)//处理输入
+    val rhs_input_state = RegInit(false.B)
     val valid_reg_1 = RegInit(false.B)
-    val valid_reg_2 = RegInit(false.B)
-    val valid_reg_3 = RegInit(false.B)
     val inputReady_reg = RegInit(true.B)
-    valid_reg_2 := valid_reg_1
-    valid_reg_3 := valid_reg_2
     io.outValid := valid_reg_1
     io.inputReady := inputReady_reg & (~io.start)
     val innerproduct_row_counter = Counter(16)
     val innerproduct_col_counter = Counter(16)
-    val lhsData_for_innerproduct = Reg(Vec(16,F44()))
-    val lhsCol_for_innerproduct = Reg(Vec(16,UInt(8.W)))
     val output_for_innerproduct = Wire(Vec(16,F44()))
-    val rhs_for_innerproduct = Reg(Vec(16,F44()))
     val innerproduct_state = RegInit(false.B)
 
     val reduction_state = RegInit(false.B)
-    val reduction_row_counter = Counter(16)
+    val reduction_row_counter = Counter(17)
     val reduction_col_counter = Counter(16)
-    val split_for_reduction = Reg(Vec(17,Bool()))
-    val target_row_for_reduction = Reg(Vec(16,UInt(8.W)))
     val border_control_for_reduction = Reg(Bool())
     val output_for_reduction = Wire(Vec(16,F44()))
 
     val collect_reset_state = RegInit(false.B)
     val collect_reset_counter = Counter(16)
-    val row_for_collect = Reg(UInt(8.W))
-    val row_output_for_collect = Reg(UInt(8.W))
-    val reset_buffer_for_collect = Reg(Bool())
-    val write_control_for_collect = Reg(Bool())
     val collect_write_row_counter = Counter(16)
     val collect_write_col_counter = Counter(16)
     val collect_write_state = RegInit(false.B)
     val mask_buffer = Reg(Vec(16,Vec(16,Bool())))
-    val mask_for_collect = Reg(Vec(16,Bool()))
     val collect_output_row_counter = Counter(19)
     val collect_output_state = RegInit(false.B)
     val result_for_collect = Wire(Vec(16,F44()))
-    val row_for_reset_reg = Reg(UInt(8.W))
 
     val innerproduct = Module(new innerproduct)
     innerproduct.io.lhsCol := lhsCol_buffer.read(innerproduct_row_counter.value,true.B)
     innerproduct.io.lhsData := lhsData_buffer.read(innerproduct_row_counter.value,true.B)
     innerproduct.io.rhsData := rhs_buffer.read(innerproduct_col_counter.value,true.B)
-    output_for_innerproduct := innerproduct.io.outData//处理内积
+    output_for_innerproduct := innerproduct.io.outData
 
     val reduction = Module(new reduction)
     reduction.io.product := output_for_innerproduct
-    //reduction.io.split := split_for_reduction
     reduction.io.split(0) := true.B
     for(i<-0 until 16){
         reduction.io.split(i+1) := split(reduction_row_counter.value)(i)
@@ -243,7 +237,6 @@ class issue extends Module {
     collect.io.row_for_reset := collect_reset_counter.value
     result_for_collect := collect.io.result
     io.outData := result_for_collect
-    print(22)
     when(io.start){
         lhsRow_count := io.lhsRowIdx(15)(7,4)
         for(i<-0 until 16){
@@ -270,7 +263,6 @@ class issue extends Module {
         innerproduct_row_counter.reset()
         innerproduct_col_counter.reset()
         innerproduct_state := true.B
-
         collect_reset_counter.reset()
         collect_reset_state := true.B
     }
@@ -290,10 +282,6 @@ class issue extends Module {
             rhs_input_state := false.B
         }
     }
-
-    lhsCol_for_innerproduct := lhsCol_buffer.read(innerproduct_row_counter.value,true.B)
-    lhsData_for_innerproduct := lhsData_buffer.read(innerproduct_row_counter.value,true.B)
-    rhs_for_innerproduct := rhs_buffer.read(innerproduct_col_counter.value,true.B)
 
     when(innerproduct_state){
         when(innerproduct_col_counter.value===15.U){
@@ -321,29 +309,21 @@ class issue extends Module {
             }
         }
         when(innerproduct_row_counter.value===0.U&&innerproduct_col_counter.value===1.U){
-            border_control_for_reduction := true.B
             for(i<-0 until 16){
                 for(j<-0 until 16){
                     when(split(i)(j)){
                         mask_buffer(i)(row_tag(i)(j)) := true.B
                     }
                 }
-            } 
+            }
+            //border_control_for_reduction := true.B 
         }
-        when(innerproduct_row_counter.value===1.U&&innerproduct_col_counter.value===1.U){
+        when(innerproduct_row_counter.value===0.U&&innerproduct_col_counter.value===3.U){
+            border_control_for_reduction := true.B
+        }
+        when(innerproduct_row_counter.value===1.U&&innerproduct_col_counter.value===3.U){
             border_control_for_reduction := false.B
         }
-    }
-    split_for_reduction(0) := true.B
-    for(i<-0 until 16){
-        split_for_reduction(i+1) := split(reduction_row_counter.value)(i)
-    }
-    target_row_for_reduction := row_tag(reduction_row_counter.value)
-    when(reduction_row_counter.value===0.U){
-        border_control_for_reduction := true.B
-    }
-    .otherwise{
-        border_control_for_reduction := false.B
     }
 
     when(reduction_state){
@@ -354,35 +334,23 @@ class issue extends Module {
             reduction_state := false.B
         }
         reduction_col_counter.inc()
-
-        /*when(reduction_row_counter.value===0.U&&reduction_col_counter.value===3.U){
-            collect_write_state := true.B
-            collect_write_row_counter.reset()
-            collect_write_col_counter.reset()
-        }*/
     }
 
     when(collect_reset_state){
-        row_for_reset_reg := collect_reset_counter.value
-        reset_buffer_for_collect := true.B
         collect_reset_counter.inc()
         when(collect_reset_counter.value===15.U){
             collect_reset_state := false.B
         }
     }
-    .otherwise{
-        reset_buffer_for_collect := false.B    
-    }
-    when(collect_write_state){
-        write_control_for_collect := true.B
-        row_for_collect := collect_write_col_counter.value
-        mask_for_collect := mask_buffer(collect_write_row_counter.value)
 
+    when(collect_write_state){
         when(collect_write_col_counter.value===15.U){
             collect_write_row_counter.inc()
             when(collect_write_row_counter.value===lhsRow_count){
                 collect_write_state := false.B
                 inputReady_reg := true.B
+            }
+            when(collect_write_row_counter.value===0.U){
                 collect_output_state := true.B
                 collect_output_row_counter.reset()
             }
@@ -390,22 +358,15 @@ class issue extends Module {
         collect_write_col_counter.inc()
     }
     .otherwise{
-        write_control_for_collect := false.B
         when(collect_output_state){
             collect_output_row_counter.inc()
-            when(collect_output_row_counter.value===18.U){
+            when(collect_output_row_counter.value===15.U){
                 collect_output_state := false.B
             }
-            row_output_for_collect := collect_output_row_counter.value(3,0)
             valid_reg_1 := true.B
-            print(11)
         }
         .otherwise{
             valid_reg_1 := false.B 
-            print(33)  
         } 
-        }
-    when(true.B){
-        print(4)
     }
 }
